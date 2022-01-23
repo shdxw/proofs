@@ -1,0 +1,80 @@
+version: "3.7"
+
+networks:
+  net:
+    driver: bridge
+
+services:
+  detect:
+    #      image: 'ultralytics/yolov5:latest'
+    build:
+      context: detector
+      dockerfile: Dockerfile
+    container_name: python-detect
+    shm_size: 512mb
+    restart: on-failure
+    networks:
+      - net
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities:
+                - gpu
+                - utility # nvidia-smi
+                - compute # CUDA. Required to avoid "CUDA version: N/A"
+    ports:
+      - "8092:8080"
+    expose:
+      - "8092"
+  #      volumes:
+  #        - ./env:/app/venv
+
+  app:
+    image: 'docker-spring-boot-postgres:latest'
+    build:
+      context: backend
+      dockerfile: Dockerfile
+    container_name: spring-backend
+    restart: on-failure
+    networks:
+      - net
+    ports:
+      - "8091:8080"
+    depends_on:
+      - 'db'
+      - 'detect'
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://db:5432/cameras
+      - SPRING_DATASOURCE_USERNAME=compose-postgres
+      - SPRING_DATASOURCE_PASSWORD=compose-postgres
+      - SPRING_JPA_HIBERNATE_DDL_AUTO=update
+
+  db:
+    image: 'postgres:13.1'
+    restart: always
+    container_name: db
+    expose:
+      - '5432'
+    environment:
+      - POSTGRES_USER=compose-postgres
+      - POSTGRES_PASSWORD=compose-postgres
+      - POSTGRES_DB=cameras
+    volumes:
+      # copy the sql script to create tables
+      - ./sql/create_tables.sql:/docker-entrypoint-initdb.d/create_tables.sql
+    networks:
+      - net
+
+  nginx:
+    container_name: nginx
+    image: nginx
+    restart: always
+    volumes:
+      - ./conf:/etc/nginx/conf.d
+      - ./html:/usr/share/nginx/html
+    ports:
+      - "80:80"
+    networks:
+      - net
